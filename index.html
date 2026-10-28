@@ -69,8 +69,10 @@ function choose(key) {
   const sol = SOLS[key];
   cfg = {group: fam.group, k: fam.k, flips: sol.flips};
   P = sol.P.slice(); x = sol.x.slice();
-  contacts = findContacts(cfg, polyOf(P), x, 1e-5);
-  x = solveContacts(cfg, polyOf(P), x, contacts).x;
+  if (fam.key !== 'tri') {
+    contacts = findContacts(cfg, polyOf(P), x, 1e-5);
+    x = solveContacts(cfg, polyOf(P), x, contacts).x;
+  }
   draggable = shapeDof(fam, P) >= 1;
   rebuild();
   const poly = cell.tiles[0].poly, c = centroid(poly);
@@ -81,7 +83,14 @@ function choose(key) {
 }
 
 const centroid = poly => ({x: poly.reduce((s, v) => s + v.x, 0) / poly.length, y: poly.reduce((s, v) => s + v.y, 0) / poly.length});
-function rebuild() { cell = buildCell(cfg, polyOf(P), x); }
+// Triangles: tile the plane by parallelograms (triangle + its half-turn about the midpoint of V1V2) on the
+// lattice spanned by two sides, so the tiling is always vertex to vertex.
+function triCell() {
+  const [A, B, C] = polyOf(P), half = v => ({x: B.x + C.x - v.x, y: B.y + C.y - v.y});
+  return {lat: {t1: {x: B.x - A.x, y: B.y - A.y}, t2: {x: C.x - A.x, y: C.y - A.y}},
+          tiles: [{orbit: 0, poly: [A, B, C]}, {orbit: 0, poly: [A, B, C].map(half)}]};
+}
+function rebuild() { cell = fam.key === 'tri' ? triCell() : buildCell(cfg, polyOf(P), x); }
 
 // ---- view transform: screen = s * R(phi) * world + (ox, oy)
 const toScreen = p => { const c = Math.cos(view.phi), s = Math.sin(view.phi); return {x: view.s * (c * p.x - s * p.y) + view.ox, y: view.s * (s * p.x + c * p.y) + view.oy}; };
@@ -134,6 +143,7 @@ function tryMove(i, qTile) {
   for (let t = 1, it = 0; it < 6; it++, t /= 2) {
     const Pt = t === 1 ? Pn : project(fam, P.map((v, k) => v + t * (Pn[k] - v)));
     if (!tileOK(Pt)) continue;
+    if (fam.key === 'tri') return {P: Pt, x};
     const Pm = polyOf(Pt), s = solveContacts(cfg, Pm, x, contacts, 30);
     if (s.r < 1e-9 && energy(cfg, Pm, s.x, true) < 1e-8) return {P: Pt, x: s.x};
   }
