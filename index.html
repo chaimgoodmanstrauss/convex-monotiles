@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Convex Monotiles</title>
+<style>
+  html,body{margin:0;height:100%;background:#eef1ea;font:14px system-ui,sans-serif;color:#1f3a28}
+  canvas{position:fixed;inset:0;width:100%;height:100%;touch-action:none}
+  h1{position:fixed;top:10px;left:14px;margin:0;font:600 20px system-ui,sans-serif;color:#1f3a28;pointer-events:none}
+  #bar{position:fixed;top:44px;left:10px;right:10px;display:flex;flex-wrap:wrap;gap:8px}
+  #bar button{border:1px solid #9fb59f;border-radius:6px;background:#f7f9f4;padding:6px 12px;font:inherit;color:inherit;cursor:pointer}
+  #bar button.on{background:#1f3a28;color:#f7f9f4;border-color:#1f3a28}
+  #menu{position:fixed;display:none;flex-direction:column;background:#f7f9f4;border:1px solid #1f3a28;border-radius:6px;padding:4px;box-shadow:0 4px 14px #0003;max-height:70vh;overflow:auto}
+  #menu button{border:0;background:none;text-align:left;padding:5px 10px;border-radius:4px;white-space:nowrap}
+  #menu button:hover{background:#dde8d6}
+  #menu button.on{background:#1f3a28;color:#f7f9f4}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<h1>Monohedral Convex Polygon Tiling</h1>
+<div id="bar"></div>
+<div id="menu"></div>
+<script type="module">
+import {FAMILIES, orbifold, polyOf, dragShape, project, tileOK, shapeDof} from './families.js';
+import {SOLS} from './solutions.js';
+import {buildCell, energy, findContacts, solveContacts} from './tiler.js';
+
+const COLORS = ['#b5cfae','#c9d9a3','#a9c4b4','#d8cfa6','#9fb99a','#c3b8a0','#b0cf9f','#cbd6b8'];
+const INK = '#1f3a28';
+const cv = document.getElementById('c'), ctx = cv.getContext('2d'), bar = document.getElementById('bar');
+let W = 0, H = 0, dpr = 1;
+
+// ---- state
+let fam = null, cfg = null, P = null, x = null, contacts = [], draggable = false;
+let view = {s: 100, phi: 0, ox: 0, oy: 0};
+let cell = null, drag = -1;
+
+// ---- UI: one row of polygon buttons; clicking one pops up its menu until the next click
+const menu = document.getElementById('menu'), buttons = {}, lastKey = {};
+for (const n of [3, 4, 5, 6]) {
+  const fams = FAMILIES.filter(f => f.n === n && SOLS[f.key]);
+  lastKey[n] = fams[0].key;
+  const b = document.createElement('button'); b.textContent = fams[0].title;
+  b.addEventListener('pointerdown', e => e.stopPropagation());
+  b.onclick = () => { choose(lastKey[n]); openMenu(n, b); };
+  bar.appendChild(b); buttons[n] = b;
+}
+function openMenu(n, b) {
+  menu.innerHTML = '';
+  for (const f of FAMILIES.filter(f => f.n === n && SOLS[f.key])) {
+    const m = document.createElement('button'); m.textContent = `${f.label} · k=${f.k} · ${orbifold[f.group]}`;
+    m.classList.toggle('on', fam && f.key === fam.key);
+    m.onclick = () => choose(f.key);
+    menu.appendChild(m);
+  }
+  const r = b.getBoundingClientRect();
+  menu.style.left = r.left + 'px'; menu.style.top = r.bottom + 4 + 'px'; menu.style.display = 'flex';
+}
+addEventListener('pointerdown', () => { menu.style.display = 'none'; });
+menu.addEventListener('pointerdown', e => { e.stopPropagation(); }, false);
+menu.addEventListener('click', () => { menu.style.display = 'none'; });
+
+function choose(key) {
+  fam = FAMILIES.find(f => f.key === key);
+  for (const n in buttons) buttons[n].classList.toggle('on', +n === fam.n);
+  lastKey[fam.n] = key;
+  const sol = SOLS[key];
+  cfg = {group: fam.group, k: fam.k, flips: sol.flips};
+  P = sol.P.slice(); x = sol.x.slice();
+  contacts = findContacts(cfg, polyOf(P), x, 1e-5);
+  x = solveContacts(cfg, polyOf(P), x, contacts).x;
+  draggable = shapeDof(fam, P) >= 1;
+  rebuild();
+  const poly = cell.tiles[0].poly, c = centroid(poly);
+  const diam = Math.max(...poly.map(v => Math.hypot(v.x - c.x, v.y - c.y))) * 2;
+  view = {s: Math.min(150, Math.min(W, H) / 4) / diam, phi: 0, ox: 0, oy: 0};
+  view.ox = W / 2 - view.s * c.x; view.oy = H / 2 - view.s * c.y;
+  draw();
+}
+
+const centroid = poly => ({x: poly.reduce((s, v) => s + v.x, 0) / poly.length, y: poly.reduce((s, v) => s + v.y, 0) / poly.length});
+function rebuild() { cell = buildCell(cfg, polyOf(P), x); }
+
+// ---- view transform: screen = s * R(phi) * world + (ox, oy)
+const toScreen = p => { const c = Math.cos(view.phi), s = Math.sin(view.phi); return {x: view.s * (c * p.x - s * p.y) + view.ox, y: view.s * (s * p.x + c * p.y) + view.oy}; };
+const toWorld = p => { const c = Math.cos(view.phi), s = Math.sin(view.phi), X = (p.x - view.ox) / view.s, Y = (p.y - view.oy) / view.s; return {x: c * X + s * Y, y: -s * X + c * Y}; };
+
+// ---- drawing
+function shade(hex, f) {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgb(${[n >> 16, (n >> 8) & 255, n & 255].map(v => Math.round(v * f))})`;
+}
+function path(poly, sx, sy) {
+  ctx.beginPath();
+  poly.forEach((v, i) => { const s = toScreen({x: v.x + sx, y: v.y + sy}); i ? ctx.lineTo(s.x, s.y) : ctx.moveTo(s.x, s.y); });
+  ctx.closePath();
+}
+function draw() {
+  if (!cell) return;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+  const {t1, t2} = cell.lat, det = t1.x * t2.y - t1.y * t2.x;
+  const corners = [{x: 0, y: 0}, {x: W, y: 0}, {x: 0, y: H}, {x: W, y: H}].map(toWorld);
+  const co = corners.map(p => ({a: (p.x * t2.y - p.y * t2.x) / det, b: (t1.x * p.y - t1.y * p.x) / det}));
+  const lo = {a: Math.floor(Math.min(...co.map(c => c.a))) - 3, b: Math.floor(Math.min(...co.map(c => c.b))) - 3};
+  const hi = {a: Math.ceil(Math.max(...co.map(c => c.a))) + 3, b: Math.ceil(Math.max(...co.map(c => c.b))) + 3};
+  ctx.lineJoin = 'round'; ctx.strokeStyle = '#aeb5ae'; ctx.lineWidth = 2.5;
+  for (let i = lo.a; i <= hi.a; i++) for (let j = lo.b; j <= hi.b; j++) {
+    const sx = i * t1.x + j * t2.x, sy = i * t1.y + j * t2.y;
+    const c = toScreen({x: sx, y: sy});
+    if (c.x < -view.s * 40 || c.x > W + view.s * 40 || c.y < -view.s * 40 || c.y > H + view.s * 40) continue;
+    for (const t of cell.tiles) {
+      if (i === 0 && j === 0 && t === cell.tiles[0]) continue;
+      path(t.poly, sx, sy);
+      ctx.fillStyle = COLORS[t.orbit % COLORS.length]; ctx.fill(); ctx.stroke();
+    }
+  }
+  const sp = cell.tiles[0].poly;
+  path(sp, 0, 0);
+  ctx.fillStyle = shade(COLORS[0], 0.72); ctx.fill();
+  ctx.strokeStyle = INK; ctx.lineWidth = 5; ctx.stroke();
+  if (draggable) sp.forEach(v => {
+    const s = toScreen(v);
+    ctx.beginPath(); ctx.arc(s.x, s.y, 6, 0, 2 * Math.PI);
+    ctx.fillStyle = '#f7f9f4'; ctx.fill(); ctx.lineWidth = 2; ctx.stroke();
+  });
+}
+
+// ---- dragging: move a vertex while staying in the family, then re-solve the tiling by continuation
+function tryMove(i, qTile) {
+  const Pn = dragShape(fam, P, i, qTile);
+  for (let t = 1, it = 0; it < 6; it++, t /= 2) {
+    const Pt = t === 1 ? Pn : project(fam, P.map((v, k) => v + t * (Pn[k] - v)));
+    if (!tileOK(Pt)) continue;
+    const Pm = polyOf(Pt), s = solveContacts(cfg, Pm, x, contacts, 30);
+    if (s.r < 1e-9 && energy(cfg, Pm, s.x, true) < 1e-8) return {P: Pt, x: s.x};
+  }
+  return null;
+}
+function edgeAngle(poly) { return Math.atan2(poly[1].y - poly[0].y, poly[1].x - poly[0].x); }
+
+const pos = e => { const r = cv.getBoundingClientRect(); return {x: e.clientX - r.left, y: e.clientY - r.top}; };
+function pick(p) {
+  if (!draggable) return -1;
+  let best = -1, bd = 16;
+  cell.tiles[0].poly.forEach((v, i) => { const s = toScreen(v), d = Math.hypot(s.x - p.x, s.y - p.y); if (d < bd) { bd = d; best = i; } });
+  return best;
+}
+cv.addEventListener('pointerdown', e => { if (!cell) return; drag = pick(pos(e)); if (drag >= 0) cv.setPointerCapture(e.pointerId); });
+cv.addEventListener('pointermove', e => {
+  if (!cell) return;
+  const p = pos(e);
+  if (drag < 0) { cv.style.cursor = pick(p) >= 0 ? 'grab' : 'default'; return; }
+  // pointer in the tile's own frame: poly = R * P + t
+  const poly = cell.tiles[0].poly, pw = toWorld(p);
+  const ang = Math.atan2(poly[1].y - poly[0].y, poly[1].x - poly[0].x) - Math.atan2(P[3] - P[1], P[2] - P[0]);
+  const c = Math.cos(ang), s = Math.sin(ang);
+  const t = {x: poly[0].x - (c * P[0] - s * P[1]), y: poly[0].y - (s * P[0] + c * P[1])};
+  const dx = pw.x - t.x, dy = pw.y - t.y;
+  const r = tryMove(drag, [c * dx + s * dy, -s * dx + c * dy]);
+  if (!r) return;
+  const before = poly.map(toScreen);
+  P = r.P; x = r.x; rebuild();
+  // choose the view (a similarity) that keeps every vertex except the grabbed one where it was on screen
+  const np = cell.tiles[0].poly, idx = np.map((_, i) => i).filter(i => i !== drag);
+  const mean = (pts, f) => pts.reduce((m, v) => m + f(v), 0) / pts.length;
+  const wx = mean(idx.map(i => np[i]), v => v.x), wy = mean(idx.map(i => np[i]), v => v.y);
+  const qx = mean(idx.map(i => before[i]), v => v.x), qy = mean(idx.map(i => before[i]), v => v.y);
+  let nr = 0, ni = 0, dn = 0;
+  for (const i of idx) {
+    const ux = np[i].x - wx, uy = np[i].y - wy, vx = before[i].x - qx, vy = before[i].y - qy;
+    nr += ux * vx + uy * vy; ni += ux * vy - uy * vx; dn += ux * ux + uy * uy;
+  }
+  const ar = nr / dn, ai = ni / dn;
+  view.s = Math.hypot(ar, ai); view.phi = Math.atan2(ai, ar);
+  view.ox = qx - (ar * wx - ai * wy); view.oy = qy - (ai * wx + ar * wy);
+  draw();
+});
+cv.addEventListener('pointerup', () => { drag = -1; });
+
+function resize() {
+  dpr = window.devicePixelRatio || 1; W = innerWidth; H = innerHeight;
+  cv.width = W * dpr; cv.height = H * dpr; draw();
+}
+addEventListener('resize', resize);
+resize();
+choose(lastKey[5]);
+</script>
+</body>
+</html>
