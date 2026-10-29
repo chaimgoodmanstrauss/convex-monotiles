@@ -79,7 +79,7 @@ export function buildCell(cfg, P, x) {
   return {lat, tiles};
 }
 
-function reduceBasis(a, b) { // Gauss reduction: short, nearly orthogonal basis of the same lattice
+export function reduceBasis(a, b) { // Gauss reduction: short, nearly orthogonal basis of the same lattice
   for (let it = 0; it < 50; it++) {
     if (a.x * a.x + a.y * a.y > b.x * b.x + b.y * b.y) [a, b] = [b, a];
     const m = Math.round((a.x * b.x + a.y * b.y) / (a.x * a.x + a.y * a.y));

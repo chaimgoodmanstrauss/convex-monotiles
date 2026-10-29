@@ -25,7 +25,7 @@
 <script type="module">
 import {FAMILIES, orbifold, polyOf, dragShape, project, tileOK, shapeDof} from './families.js';
 import {SOLS} from './solutions.js';
-import {buildCell, energy, findContacts, solveContacts} from './tiler.js';
+import {buildCell, reduceBasis, energy, findContacts, solveContacts} from './tiler.js';
 
 const COLORS = ['#b5cfae','#c9d9a3','#a9c4b4','#d8cfa6','#9fb99a','#c3b8a0','#b0cf9f','#cbd6b8'];
 const INK = '#1f3a28';
@@ -110,16 +110,18 @@ function draw() {
   if (!cell) return;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, W, H);
-  const {t1, t2} = cell.lat, det = t1.x * t2.y - t1.y * t2.x;
-  const corners = [{x: 0, y: 0}, {x: W, y: 0}, {x: 0, y: H}, {x: W, y: H}].map(toWorld);
+  const {a: t1, b: t2} = reduceBasis(cell.lat.t1, cell.lat.t2), det = t1.x * t2.y - t1.y * t2.x;
+  // reach of the cell's tiles from its lattice point, so every cell touching the screen is drawn (and little else)
+  const m = Math.max(...cell.tiles.flatMap(t => t.poly.map(v => Math.hypot(v.x, v.y)))) * view.s;
+  const corners = [{x: -m, y: -m}, {x: W + m, y: -m}, {x: -m, y: H + m}, {x: W + m, y: H + m}].map(toWorld);
   const co = corners.map(p => ({a: (p.x * t2.y - p.y * t2.x) / det, b: (t1.x * p.y - t1.y * p.x) / det}));
-  const lo = {a: Math.floor(Math.min(...co.map(c => c.a))) - 3, b: Math.floor(Math.min(...co.map(c => c.b))) - 3};
-  const hi = {a: Math.ceil(Math.max(...co.map(c => c.a))) + 3, b: Math.ceil(Math.max(...co.map(c => c.b))) + 3};
+  const lo = {a: Math.floor(Math.min(...co.map(c => c.a))), b: Math.floor(Math.min(...co.map(c => c.b)))};
+  const hi = {a: Math.ceil(Math.max(...co.map(c => c.a))), b: Math.ceil(Math.max(...co.map(c => c.b)))};
   ctx.lineJoin = 'round'; ctx.strokeStyle = '#aeb5ae'; ctx.lineWidth = 2.5;
   for (let i = lo.a; i <= hi.a; i++) for (let j = lo.b; j <= hi.b; j++) {
     const sx = i * t1.x + j * t2.x, sy = i * t1.y + j * t2.y;
     const c = toScreen({x: sx, y: sy});
-    if (c.x < -view.s * 40 || c.x > W + view.s * 40 || c.y < -view.s * 40 || c.y > H + view.s * 40) continue;
+    if (c.x < -m || c.x > W + m || c.y < -m || c.y > H + m) continue;
     for (const t of cell.tiles) {
       if (i === 0 && j === 0 && t === cell.tiles[0]) continue;
       path(t.poly, sx, sy);
