@@ -29,7 +29,7 @@ export const FAMILIES = [
   {key: 'p10', n: 5, label: 'Type 10', group: 'p2', k: 3, flips: [0, 0, 0], cons: mk((s, g) => [s(0) - s(1), s(0) - s(2) - s(4), g(0) - 90*d, g(1) + g(4) - PI, g(1) + 2*g(2) - 2*PI])},
   {key: 'p11', n: 5, label: 'Type 11', group: 'pgg', k: 2, flips: [0, 0], cons: mk((s, g) => [2*s(0) + s(2) - s(3), s(3) - s(4), g(0) - 90*d, g(2) + g(4) - PI, 2*g(1) + g(2) - 2*PI])},
   {key: 'p12', n: 5, label: 'Type 12', group: 'pgg', k: 2, flips: [0, 0], cons: mk((s, g) => [2*s(0) - s(3), s(3) - s(2) - s(4), g(0) - 90*d, g(2) + g(4) - PI, 2*g(1) + g(2) - 2*PI])},
-  {key: 'p13', n: 5, label: 'Type 13', group: 'pgg', k: 2, flips: [0, 0], cons: mk((s, g) => [s(3) - 2*s(0), s(3) - 2*s(4), g(1) - 90*d, g(4) - 90*d, 2*g(0) + g(3) - 2*PI])},
+  {key: 'p13', n: 5, label: 'Type 13', group: 'pgg', k: 2, iso: 1, flips: [0, 0], cons: mk((s, g) => [s(3) - 2*s(0), s(3) - 2*s(4), g(1) - 90*d, g(4) - 90*d, 2*g(0) + g(3) - 2*PI])},
   {key: 'p14', n: 5, label: 'Type 14', group: 'p2', k: 3, flips: [0, 0, 0], cons: mk((s, g) => [2*s(0) - 2*s(2), s(3) - 2*s(0), s(4) - 2*s(0), g(0) - 90*d, 2*g(1) + g(2) - 2*PI, g(2) + g(4) - PI])},
   {key: 'p15', n: 5, label: 'Type 15', group: 'pgg', k: 3, flips: [0, 0, 0], cons: mk((s, g) => [s(0) - s(2), s(0) - s(4), s(1) - 2*s(0), g(0) - 150*d, g(1) - 60*d, g(2) - 135*d, g(3) - 105*d])},
 
