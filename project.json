@@ -1,1 +1,9 @@
-{"name":"Convex Monotiles","cat":"Geometry","icon":"ltile","desc":"Convex monotile families (triangle, quadrilateral, 15 pentagon types, 3 hexagon types) tiling the plane, labeled by isohedral number k and orbifold symmetry, with draggable vertices.","path":"convex-monotiles/","live":true}
+{
+  "name": "Convex Monotiles",
+  "cat": "Geometry",
+  "icon": "ltile",
+  "desc": "Convex monotile families (triangle, quadrilateral, 15 pentagon types, 3 hexagon types) tiling the plane, labeled by isohedral number k and orbifold symmetry, with draggable vertices.",
+  "path": "convex-monotiles/",
+  "live": true,
+  "img": "icons/pentagon.jpg"
+}
