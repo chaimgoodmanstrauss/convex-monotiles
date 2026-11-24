@@ -48,7 +48,7 @@ export function latticeOf(cfg, A, lp) {
   }
 }
 const rot = a => { const c = Math.cos(a), s = Math.sin(a); return p => ({x: c * p.x - s * p.y, y: s * p.x + c * p.y}); };
-function elements(g, lat) {
+export function elements(g, lat) {
   switch (g) {
     case 'p2': return [p => p, rot(Math.PI)];
     case 'pgg': { const w = lat.t1.x, h = lat.t2.y;

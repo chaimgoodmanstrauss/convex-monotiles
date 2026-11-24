@@ -25,7 +25,7 @@
 <script type="module">
 import {FAMILIES, orbifold, polyOf, dragShape, project, tileOK, shapeDof} from './families.js';
 import {SOLS} from './solutions.js';
-import {buildCell, reduceBasis, energy, findContacts, solveContacts} from './tiler.js';
+import {buildCell, elements, reduceBasis, energy, findContacts, solveContacts} from './tiler.js';
 
 const COLORS = ['#b5cfae','#c9d9a3','#a9c4b4','#d8cfa6','#9fb99a','#c3b8a0','#b0cf9f','#cbd6b8'];
 const INK = '#1f3a28';
@@ -140,11 +140,75 @@ function draw() {
   path(sp, 0, 0);
   ctx.fillStyle = shade(COLORS[0], 0.72); ctx.fill();
   ctx.strokeStyle = INK; ctx.lineWidth = 5; ctx.stroke();
+  drawSymmetries();
   if (draggable) sp.forEach(v => {
     const s = toScreen(v);
     ctx.beginPath(); ctx.arc(s.x, s.y, 6, 0, 2 * Math.PI);
     ctx.fillStyle = '#f7f9f4'; ctx.fill(); ctx.lineWidth = 2; ctx.stroke();
   });
+}
+
+// ---- symmetry elements of the tiling that meet the marked tile: rotation centers, mirror lines, glide axes
+function symmetries() {
+  const I = {L: [1, 0, 0, 1], t: {x: 0, y: 0}};
+  let els;
+  if (fam.key === 'tri' || fam.key === 'quad') {
+    const Q = polyOf(P), a = fam.key === 'tri' ? Q[1] : Q[0], b = fam.key === 'tri' ? Q[2] : Q[1];
+    els = [I, {L: [-1, 0, 0, -1], t: {x: a.x + b.x, y: a.y + b.y}}];
+  } else els = elements(cfg.group, cell.lat).map(f => {
+    const t = f({x: 0, y: 0}), u = f({x: 1, y: 0}), v = f({x: 0, y: 1});
+    return {L: [u.x - t.x, v.x - t.x, u.y - t.y, v.y - t.y], t};
+  });
+  const poly = cell.tiles[0].poly, {t1, t2} = cell.lat, eps = 1e-7;
+  const inside = c => {
+    let w = false;
+    for (let i = 0, n = poly.length; i < n; i++) {
+      const p = poly[i], q = poly[(i + 1) % n], ex = q.x - p.x, ey = q.y - p.y;
+      const tt = Math.max(0, Math.min(1, ((c.x - p.x) * ex + (c.y - p.y) * ey) / (ex * ex + ey * ey)));
+      if (Math.hypot(c.x - p.x - tt * ex, c.y - p.y - tt * ey) < eps) return true;
+      if ((p.y > c.y) !== (q.y > c.y) && c.x < p.x + (c.y - p.y) / (q.y - p.y) * ex) w = !w;
+    }
+    return w;
+  };
+  const rots = new Map(), lines = new Map(), R = 6;
+  for (const g of els) for (let i = -R; i <= R; i++) for (let j = -R; j <= R; j++) {
+    const [a, b, c, d] = g.L, tx = g.t.x + i * t1.x + j * t2.x, ty = g.t.y + i * t1.y + j * t2.y;
+    if (a * d - b * c > 0) {
+      const tr = a + d; if (tr > 2 - 1e-9) continue;
+      const k = 2 - tr, ctr = {x: ((1 - d) * tx + b * ty) / k, y: (c * tx + (1 - a) * ty) / k};
+      if (!inside(ctr)) continue;
+      const order = Math.round(2 * Math.PI / Math.abs(Math.atan2(c, a))), key = ctr.x.toFixed(5) + ',' + ctr.y.toFixed(5);
+      if (!rots.has(key) || rots.get(key).order < order) rots.set(key, {ctr, order});
+    } else {
+      const th = Math.atan2(c, a), dx = Math.cos(th / 2), dy = Math.sin(th / 2), s = tx * dx + ty * dy;
+      const o = {x: (tx - s * dx) / 2, y: (ty - s * dy) / 2}, off = -o.x * dy + o.y * dx;
+      let lo = Infinity, hi = -Infinity, u0 = Infinity, u1 = -Infinity;
+      for (const v of poly) { const e = -v.x * dy + v.y * dx - off; lo = Math.min(lo, e); hi = Math.max(hi, e); const u = v.x * dx + v.y * dy; u0 = Math.min(u0, u); u1 = Math.max(u1, u); }
+      if (lo > eps || hi < -eps) continue;
+      const key = (((th / 2) % Math.PI + Math.PI) % Math.PI).toFixed(4) + ',' + off.toFixed(4);
+      if (!lines.has(key) || Math.abs(lines.get(key).s) > Math.abs(s) + 1e-9) lines.set(key, {o, dx, dy, s, u0, u1});
+    }
+  }
+  return {rots: [...rots.values()], lines: [...lines.values()]};
+}
+function drawSymmetries() {
+  const {rots, lines} = symmetries();
+  ctx.save(); ctx.lineWidth = 2.5;
+  for (const L of lines) {
+    const pad = 0.2 * (L.u1 - L.u0), glide = Math.abs(L.s) > 1e-6;
+    const at = u => toScreen({x: L.o.x + (u - (L.o.x * L.dx + L.o.y * L.dy)) * L.dx, y: L.o.y + (u - (L.o.x * L.dx + L.o.y * L.dy)) * L.dy});
+    const p = at(L.u0 - pad), q = at(L.u1 + pad);
+    ctx.strokeStyle = '#2b5fa8'; ctx.setLineDash(glide ? [10, 6] : []);
+    ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(q.x, q.y); ctx.stroke();
+  }
+  ctx.setLineDash([]); ctx.fillStyle = '#c0392b'; ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5;
+  for (const r of rots) {
+    const s = toScreen(r.ctr); ctx.beginPath();
+    if (r.order === 2) ctx.ellipse(s.x, s.y, 8, 4.5, view.phi + Math.PI / 4, 0, 2 * Math.PI);
+    else for (let k = 0; k < r.order; k++) { const a = view.phi - Math.PI / 2 + 2 * Math.PI * k / r.order; k ? ctx.lineTo(s.x + 8 * Math.cos(a), s.y + 8 * Math.sin(a)) : ctx.moveTo(s.x + 8 * Math.cos(a), s.y + 8 * Math.sin(a)); }
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+  }
+  ctx.restore();
 }
 
 // ---- dragging: move a vertex while staying in the family, then re-solve the tiling by continuation
