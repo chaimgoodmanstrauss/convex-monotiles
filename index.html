@@ -15,6 +15,8 @@
   #menu button{border:0;background:none;text-align:left;padding:5px 10px;border-radius:4px;white-space:nowrap}
   #menu button:hover{background:#dde8d6}
   #menu button.on{background:#1f3a28;color:#f7f9f4}
+  #cons{position:fixed;left:14px;bottom:12px;max-width:calc(100% - 28px);background:#f7f9f4e6;border:1px solid #9fb59f;border-radius:6px;padding:6px 10px;font-size:13px;line-height:1.5;pointer-events:none}
+  #cons:empty{display:none}
 </style>
 </head>
 <body>
@@ -22,10 +24,22 @@
 <h1>Monohedral Convex Polygon Tiling</h1>
 <div id="bar"></div>
 <div id="menu"></div>
+<div id="cons"></div>
+<!-- cache-busting: versioned module URLs (Cloudflare caches .js for 4h); regenerate hashes on each deploy -->
+<script type="importmap">
+{"imports": {
+  "./families.js": "./families.js?v=b8bc6b25",
+  "./solutions.js": "./solutions.js?v=59ab1ed5",
+  "./tiler.js": "./tiler.js?v=08bf4ed3",
+  "./edgesym.js": "./edgesym.js?v=09ffb3fd",
+  "./edgesym-data.js": "./edgesym-data.js?v=a9dd4a4b"
+}}
+</script>
 <script type="module">
 import {FAMILIES, orbifold, polyOf, dragShape, project, tileOK, shapeDof} from './families.js';
 import {SOLS} from './solutions.js';
 import {buildCell, elements, reduceBasis, energy, findContacts, solveContacts} from './tiler.js';
+import {makeES, cellOverlap} from './edgesym.js';
 
 const COLORS = ['#b5cfae','#c9d9a3','#a9c4b4','#d8cfa6','#9fb99a','#c3b8a0','#b0cf9f','#cbd6b8'];
 const INK = '#1f3a28';
@@ -36,6 +50,9 @@ let W = 0, H = 0, dpr = 1;
 let fam = null, cfg = null, P = null, x = null, contacts = [], draggable = false;
 let view = {s: 100, phi: 0, ox: 0, oy: 0};
 let cell = null, drag = -1;
+// mode 'edge' (experiment): each type is parametrized directly by the constraints its tiling's edge symmetries impose
+// (edgesym.js), and the cell is glued together from the tile; mode 'eqs': family equations + contact solver.
+let mode = 'edge', es = null;
 
 // ---- UI: one row of polygon buttons; clicking one pops up its menu until the next click
 const menu = document.getElementById('menu'), buttons = {}, lastKey = {};
@@ -46,6 +63,13 @@ for (const n of [3, 4, 5, 6]) {
   b.addEventListener('pointerdown', e => e.stopPropagation());
   b.onclick = () => { choose(lastKey[n]); openMenu(n, b); };
   bar.appendChild(b); buttons[n] = b;
+}
+{
+  const b = document.createElement('button'), label = () => { b.textContent = mode === 'edge' ? 'constraints: edge symmetries' : 'constraints: family equations'; };
+  label(); b.style.marginLeft = 'auto';
+  b.addEventListener('pointerdown', e => e.stopPropagation());
+  b.onclick = () => { mode = mode === 'edge' ? 'eqs' : 'edge'; label(); choose(fam.key); };
+  bar.appendChild(b);
 }
 function openMenu(n, b) {
   menu.innerHTML = '';
@@ -69,11 +93,14 @@ function choose(key) {
   const sol = SOLS[key];
   cfg = {group: fam.group, k: fam.k, flips: sol.flips};
   P = sol.P.slice(); x = sol.x.slice();
-  if (!direct()) {
+  es = mode === 'edge' && !direct() ? makeES(key, P) : null;
+  if (es) P = es.snap(P);
+  else if (!direct()) {
     contacts = findContacts(cfg, polyOf(P), x, 1e-5);
     x = solveContacts(cfg, polyOf(P), x, contacts).x;
   }
-  draggable = shapeDof(fam, P) >= 1;
+  draggable = es ? es.dof >= 1 : shapeDof(fam, P) >= 1;
+  document.getElementById('cons').innerHTML = es ? 'edge-symmetry constraints: ' + es.describe.join(' &nbsp;·&nbsp; ') + ` &nbsp;(${Math.max(0, es.dof)} shape parameter${es.dof === 1 ? '' : 's'})` : '';
   if (fam.n === 6) genericize();
   rebuild();
   const poly = cell.tiles[0].poly, c = centroid(poly);
@@ -98,7 +125,7 @@ function quadCell() {
           tiles: [{orbit: 0, poly: [A, B, C, D]}, {orbit: 0, poly: [A, B, C, D].map(half)}]};
 }
 const direct = () => fam.key === 'tri' || fam.key === 'quad';
-function rebuild() { cell = fam.key === 'tri' ? triCell() : fam.key === 'quad' ? quadCell() : buildCell(cfg, polyOf(P), x); }
+function rebuild() { cell = fam.key === 'tri' ? triCell() : fam.key === 'quad' ? quadCell() : es ? es.build(P) : buildCell(cfg, polyOf(P), x); }
 
 // ---- view transform: screen = s * R(phi) * world + (ox, oy)
 const toScreen = p => { const c = Math.cos(view.phi), s = Math.sin(view.phi); return {x: view.s * (c * p.x - s * p.y) + view.ox, y: view.s * (s * p.x + c * p.y) + view.oy}; };
@@ -155,7 +182,8 @@ function symmetries() {
   if (fam.key === 'tri' || fam.key === 'quad') {
     const Q = polyOf(P), a = fam.key === 'tri' ? Q[1] : Q[0], b = fam.key === 'tri' ? Q[2] : Q[1];
     els = [I, {L: [-1, 0, 0, -1], t: {x: a.x + b.x, y: a.y + b.y}}];
-  } else els = elements(cfg.group, cell.lat).map(f => {
+  } else if (cell.els) els = cell.els;
+  else els = elements(cfg.group, cell.lat).map(f => {
     const t = f({x: 0, y: 0}), u = f({x: 1, y: 0}), v = f({x: 0, y: 1});
     return {L: [u.x - t.x, v.x - t.x, u.y - t.y, v.y - t.y], t};
   });
@@ -213,6 +241,13 @@ function drawSymmetries() {
 
 // ---- dragging: move a vertex while staying in the family, then re-solve the tiling by continuation
 function tryMove(i, qTile) {
+  if (es) { // edge-symmetry mode: move within the parametrized space; the glued cell must still be a tiling
+    for (let t = 1, it = 0; it < 6; it++, t /= 2) {
+      const Pt = es.drag(P, i, [P[2 * i] + t * (qTile[0] - P[2 * i]), P[2 * i + 1] + t * (qTile[1] - P[2 * i + 1])]).P;
+      if (tileOK(Pt) && cellOverlap(es.build(Pt)) < 1e-8) return {P: Pt, x};
+    }
+    return null;
+  }
   const Pn = dragShape(fam, P, i, qTile);
   for (let t = 1, it = 0; it < 6; it++, t /= 2) {
     const Pt = t === 1 ? Pn : project(fam, P.map((v, k) => v + t * (Pn[k] - v)));
@@ -240,11 +275,18 @@ function pick(p) {
   cell.tiles[0].poly.forEach((v, i) => { const s = toScreen(v), d = Math.hypot(s.x - p.x, s.y - p.y); if (d < bd) { bd = d; best = i; } });
   return best;
 }
-cv.addEventListener('pointerdown', e => { if (!cell) return; drag = pick(pos(e)); if (drag >= 0) cv.setPointerCapture(e.pointerId); });
+let panFrom = null; // drag on the canvas away from the vertices: pan the view, moving the marked tile with the tiling
+cv.addEventListener('pointerdown', e => {
+  if (!cell) return;
+  const p = pos(e); drag = pick(p);
+  if (drag < 0) { panFrom = p; cv.style.cursor = 'grabbing'; }
+  cv.setPointerCapture(e.pointerId);
+});
 cv.addEventListener('pointermove', e => {
   if (!cell) return;
   const p = pos(e);
-  if (drag < 0) { cv.style.cursor = pick(p) >= 0 ? 'grab' : 'default'; return; }
+  if (panFrom) { view.ox += p.x - panFrom.x; view.oy += p.y - panFrom.y; panFrom = p; draw(); return; }
+  if (drag < 0) { cv.style.cursor = 'grab'; return; }
   // pointer in the tile's own frame: poly = R * P + t
   const poly = cell.tiles[0].poly, pw = toWorld(p);
   const ang = Math.atan2(poly[1].y - poly[0].y, poly[1].x - poly[0].x) - Math.atan2(P[3] - P[1], P[2] - P[0]);
@@ -270,7 +312,19 @@ cv.addEventListener('pointermove', e => {
   view.ox = qx - (ar * wx - ai * wy); view.oy = qy - (ai * wx + ar * wy);
   draw();
 });
-cv.addEventListener('pointerup', () => { drag = -1; });
+const endDrag = () => { drag = -1; if (panFrom) { panFrom = null; cv.style.cursor = 'grab'; } };
+cv.addEventListener('pointerup', endDrag); cv.addEventListener('pointercancel', endDrag);
+// Cmd-Option-C: copy the current state (type, constraint mode, vertices, tiling params, view) to the clipboard
+addEventListener('keydown', e => {
+  if (!(e.metaKey && e.altKey && e.code === 'KeyC') || !fam) return;
+  e.preventDefault();
+  const st = JSON.stringify({key: fam.key, mode, P, x, view});
+  navigator.clipboard.writeText(st).then(() => {
+    const t = document.createElement('div'); t.textContent = 'state copied to clipboard';
+    t.style.cssText = 'position:fixed;top:12px;right:14px;background:#1f3a28;color:#f7f9f4;padding:5px 10px;border-radius:5px;font-size:13px';
+    document.body.appendChild(t); setTimeout(() => t.remove(), 1200);
+  });
+});
 
 function resize() {
   dpr = window.devicePixelRatio || 1; W = innerWidth; H = innerHeight;
